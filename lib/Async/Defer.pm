@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use Carp;
 
-use version; our $VERSION = qv('0.0.2');    # REMINDER: update Changes
+use version; our $VERSION = qv('0.0.3');    # REMINDER: update Changes
 
 # REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
@@ -32,11 +32,11 @@ sub new {
     my ($class) = @_;
     my $this = bless {}, $class;
     $SELF{refaddr $this} = {
-        parent  => undef,
-        opcode  => [],
-        pc      => NOT_RUNNING,
-        iter    => [],
-        findone => undef,
+        parent  => undef,      # parent Defer object, if any
+        opcode  => [],         # [[OP_CODE,$sub], [OP_TRY], …]
+        pc      => NOT_RUNNING,# point to _CURRENT_ opcode, if any
+        iter    => [],         # [[1,$outer_while_pc], [8,$inner_while_pc], …]
+        findone => undef,      # undef or ['next'] or ['last'] or ['throw',$err]
     };
     return $this;
 }
@@ -71,12 +71,14 @@ sub iter {
 }
 
 sub _add {
-    my ($this, $op, @param) = @_;
+    my ($this, $op, @params) = @_;
     my $self = $SELF{refaddr $this};
+
     if ($self->{pc} != NOT_RUNNING) {
         croak 'unable to modify while running';
     }
-    push @{ $self->{opcode} }, [ $op, @param ];
+
+    push @{ $self->{opcode} }, [ $op, @params ];
     return;
 }
 
@@ -168,9 +170,11 @@ sub _check_stack {
     my $extra = 0;
     for (my $i = 0; $i < @{ $self->{opcode} }; $i++) {
         my ($op) = @{ $self->{opcode}[ $i ] };
+
         if ($op == OP_CATCH || $op == OP_FINALLY) {
             $extra++;
         }
+
         if ($op_open{$op}) {
             push @stack, [$op,0];   # second number is counter for seen OP_ELSE
         }
@@ -202,8 +206,8 @@ sub run {
     my ($this, $d, @result) = @_;
     my $self = $SELF{refaddr $this};
 
-    my %op_exec = map {$_=>1} OP_CODE, OP_DEFER, OP_FINALLY;
-    if (!grep {$op_exec{ $_->[0] }} @{ $self->{opcode} }) {
+    my %op_stmt = map {$_=>1} OP_CODE, OP_DEFER, OP_FINALLY;
+    if (!grep {$op_stmt{ $_->[0] }} @{ $self->{opcode} }) {
         croak 'no operations to run, use do() first';
     }
     if ($self->{pc} != NOT_RUNNING) {
@@ -218,14 +222,17 @@ sub run {
 
 sub _op {
     my ($self) = @_;
-    my ($op, @param) = @{ $self->{opcode}[ $self->{pc} ] };
-    return wantarray ? ($op, @param) : $op;
+    my ($op, @params) = @{ $self->{opcode}[ $self->{pc} ] };
+    return wantarray ? ($op, @params) : $op;
 }
 
 sub done {
     my ($this, @result) = @_;
     my $self = $SELF{refaddr $this};
 
+    # If OP_FINALLY was called while processing next(), last() or throw(),
+    # and it was finished with done() - continue with next/last/throw by
+    # calling them _again_ instead of done().
     if ($self->{findone}) {
         my ($method, @param) = @{ $self->{findone} };
         return $this->$method(@param);
@@ -233,6 +240,12 @@ sub done {
 
     while (++$self->{pc} <= $#{ $self->{opcode} }) {
         my ($opcode, @param) = _op($self);
+
+        # @result received from previous opcode will be available to next
+        # opcode only if these opcodes stay one-after-one without any
+        # other opcodes between them (like OP_IF, for example).
+        # Only exception is (no-op) OP_TRY, OP_CATCH and OP_ENDTRY.
+        # This limitation should help user to avoid subtle bugs.
         given ($opcode) {
             when (OP_CODE) {
                 return $param[0]->($this, @result);
@@ -240,19 +253,19 @@ sub done {
             when (OP_DEFER) {
                 return $param[0]->run($this, @result);
             }
-            when (OP_CATCH) {
-                next;
-            }
             when (OP_FINALLY) {
                 return $param[0]->($this, @result);
             }
-            when (OP_ENDTRY) {
+            when ([OP_TRY,OP_CATCH,OP_ENDTRY]) {
                 next;
             }
         }
-        @result = ();   # this limitation should help user to avoid subtle bugs
+        @result = ();
+
         given ($opcode) {
             when (OP_IF) {
+                # true  - do nothing (i.e. just move to next opcode)
+                # false - skip to nearest OP_ELSE or OP_ENDIF
                 if (!$param[0]->( $this )) {
                     my $stack = 0;
                     while (++$self->{pc} <= $#{ $self->{opcode} }) {
@@ -266,6 +279,7 @@ sub done {
                 }
             }
             when (OP_ELSE) {
+                # skip this OP_ELSE branch to nearest OP_ENDIF
                 my $stack = 0;
                 while (++$self->{pc} <= $#{ $self->{opcode} }) {
                     my $op = _op($self);
@@ -276,14 +290,20 @@ sub done {
                 }
             }
             when (OP_WHILE) {
+                # We can "enter" OP_WHILE in two cases - for the first time,
+                # OR because of next() called inside this OP_WHILE.
                 if (!@{$self->{iter}} || $self->{iter}[-1][1] != $self->{pc}) {
                     push @{ $self->{iter} }, [ 1, $self->{pc} ];
                 }
+                # We now already "inside" this OP_WHILE, so we can use last()
+                # to exit _this_ OP_WHILE.
                 if (!$param[0]->( $this )) {
                     return $this->last();
                 }
             }
             when (OP_ENDWHILE) {
+                # We now still "inside" current OP_WHILE, so we can use next()
+                # to repeat _this_ OP_WHILE.
                 return $this->next();
             }
         }
@@ -291,21 +311,32 @@ sub done {
 
     $self->{pc} = NOT_RUNNING;
     if ($self->{parent}) {
-        $self->{parent}->done(@result);
+        return $self->{parent}->done(@result);
     }
-    return;
+
+    # If we're here, done() was called by last opcode, and this is
+    # top-level Defer object, nothing more to do - STOP.
 }
 
+# Before executing next/last logic we have to find and execute all
+# OP_FINALLY for all already open OP_TRY blocks within this OP_WHILE.
+# So, this helper skip opcodes inside this OP_WHILE until it found
+# either OP_FINALLY or OP_ENDWHILE or last opcode.
 sub _skip_while {
     my ($self) = @_;
+
+    # 1. next() can be called exactly on OP_ENDWHILE (by done())
+    # 2. next/last can be called by last opcode
+    # In both cases we shouldn't do anything (including moving {pc} forward).
     if (_op($self) == OP_ENDWHILE || $self->{pc} == $#{ $self->{opcode} }) {
         return;
     }
+
     my $stack = 0;
     my $trystack = 0;
     while (++$self->{pc} < $#{ $self->{opcode} }) {
         my $op = _op($self);
-        $op == OP_ENDWHILE && !$stack     ? last
+          $op == OP_ENDWHILE && !$stack     ? last
         : $op == OP_WHILE                   ? $stack++
         : $op == OP_ENDWHILE                ? $stack--
         : $op == OP_TRY                     ? $trystack++
@@ -313,6 +344,7 @@ sub _skip_while {
         : $op == OP_FINALLY && !$trystack   ? last
         :                                     next;
     }
+
     return;
 }
 
@@ -320,15 +352,18 @@ sub next {
     my ($this) = @_;
     my $self = $SELF{refaddr $this};
 
+    # Any next call to next/last/throw cancels current next/last/throw (if any).
     $self->{findone} = undef;
 
     _skip_while($self);
     my ($op, @param) = _op($self);
     if ($op == OP_FINALLY) {
+        # If OP_FINALLY ends with done() - call next() again instead.
         $self->{findone} = ['next'];
         return $param[0]->($this);
     }
 
+    # We now at OP_ENDWHILE, rewind to corresponding OP_WHILE.
     my $stack = 0;
     while (--$self->{pc} > 0) {
         $op = _op($self);
@@ -337,28 +372,34 @@ sub next {
         : $op == OP_WHILE               ? $stack--
         :                                 next;
     }
-    --$self->{pc};
+
+    # If next was called outside OP_WHILE there is no iteration number.
     if (@{ $self->{iter} }) {
         $self->{iter}[-1][0]++;
     }
 
-    $this->done();
-    return;
+    # Step one opcode back because done() will move one opcode forward
+    # and so process this OP_WHILE.
+    --$self->{pc};
+    return $this->done();
 }
 
 sub last { ## no critic (ProhibitAmbiguousNames)
     my ($this) = @_;
     my $self = $SELF{refaddr $this};
 
+    # Any next call to next/last/throw cancels current next/last/throw (if any).
     $self->{findone} = undef;
 
     _skip_while($self);
     my ($op, @param) = _op($self);
     if ($op == OP_FINALLY) {
+        # If OP_FINALLY ends with done() - call last() again instead.
         $self->{findone} = ['last'];
         return $param[0]->($this);
     }
 
+    # We now at OP_ENDWHILE.
     pop @{ $self->{iter} };
     return $this->done();
 }
@@ -368,10 +409,17 @@ sub throw {
     my $self = $SELF{refaddr $this};
     $err //= q{};
 
+    # Any next call to next/last/throw cancels current next/last/throw (if any).
     $self->{findone} = undef;
 
+    # If throw() was called by last opcode in this OP_TRY (either OP_FINALLY,
+    # or OP_CATCH if there no OP_FINALLY in this OP_TRY), then we should look
+    # for handler in outer OP_TRY, not in this one.
+    # So we set $stack=1 to skip over current OP_TRY's OP_ENDTRY.
     my ($nextop) = @{ $self->{opcode}[ $self->{pc} + 1 ] || [] };
     my $stack = $nextop && $nextop == OP_ENDTRY ? 1 : 0;
+    # Skip until OP_CATCH or OP_FINALLY in current OP_TRY block.
+    # If while skipping we exit some OP_WHILE(s) - pop their iterators.
     while (++$self->{pc} <= $#{ $self->{opcode} }) {
         my $op = _op($self);
           $op == OP_CATCH   && !$stack      ? last
@@ -398,9 +446,11 @@ sub throw {
                 return $code->($this, $err);
             }
         }
+        # Re-throw exception if no one regex in this OP_CATCH match it.
         return $this->throw($err);
     }
     else { # OP_FINALLY
+        # If OP_FINALLY ends with done() - call throw($err) again instead.
         $self->{findone} = ['throw', $err];
         return $param[0]->($this, $err);
     }

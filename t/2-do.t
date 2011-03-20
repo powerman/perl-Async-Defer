@@ -119,14 +119,14 @@ $p->do($d);
 $p->run();
 is_deeply \@result, [
     (0,1),  # start
-    (0,1),  # after try
+    (2,3),  # after try
     (0,1),  # after if
     (0,1),  # after while
     (0,1),  # after end_while
     (0,1),  # after end_if
     (2,3),  # after catch (no exception - skipped)
     10,     # after catch (got exception)
-    0,      # after try
+    11,     # after try
     20,     # after finally
     (30,31),# after catch (got exception) with finally
     ], 'transfer results from previous to next step only if both are do()';

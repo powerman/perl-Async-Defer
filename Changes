@@ -1,5 +1,9 @@
 Revision history for Async-Defer
 
+0.0.3	Sun Mar 20 18:23:53 EET 2011
+	- bugfix: keep @result when entering try()
+	- added comments for non-obvious code
+
 0.0.2	Sun Mar 20 06:59:09 EET 2011
 	- minor doc fixes and formatting
 
