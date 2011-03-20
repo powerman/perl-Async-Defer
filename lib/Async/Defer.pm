@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use Carp;
 
-use version; our $VERSION = qv('0.0.1');    # REMINDER: update Changes
+use version; our $VERSION = qv('0.0.2');    # REMINDER: update Changes
 
 # REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
@@ -485,17 +485,19 @@ B<WARNING: This is experimental code, public interface may change.>
 
 This module's goal is to simplify writing complex async event-based code,
 which usually mean huge amount of callback/errback functions, very hard to
-support. It was initially inspired by Python/Twisted's Deferred object,
-but go further and provide virtual machine which allow you to write/define
-complete async program (which consists of many callback/errback) in sync
-way, just like you write usual non-async programs.
+support. It was initially inspired by Python/Twisted's
+L<Deferred|http://twistedmatrix.com/documents/10.1.0/core/howto/defer.html>
+object, but go further and provide virtual machine which allow you to
+write/define complete async program (which consists of many
+callback/errback) in sync way, just like you write usual non-async
+programs.
 
 Main idea is simple. For example, if you've this non-async code:
 
     $var = fetch_val();
     process_val( $var );
 
-and want to make fetch_val() async, you usually do something like this:
+and want to make C<fetch_val()> async, you usually do something like this:
 
     fetch_val( cb => \&value_fetched );
     sub value_fetched {
@@ -527,33 +529,35 @@ these parts together:
     });
     $d->run();
 
-These anon subs are similar to 'statements' in perl. Between these
-'statements' you can use 'flow control' operators like if(), while() and
-try()/catch(). And inside 'statements' you can control execution flow
-using done(), throw(), next() and last() operators when current async
-function will finish and will be ready to go to the next step.
-Finally, you can use Async::Defer object to keep your 'local variables' -
+These anon subs are similar to I<statements> in perl. Between these
+I<statements> you can use I<flow control> operators like C<if()>,
+C<while()> and C<try()>/C<catch()>. And inside I<statements> you can
+control execution flow using C<done()>, C<throw()>, C<next()>
+and C<last()> operators when current async function will finish and
+will be ready to go to the next step.
+Finally, you can use Async::Defer object to keep your I<local variables> -
 this object is empty hash, and you can create any keys in it.
-Single Defer object described this way is sort of single 'function'.
-And it's possible to 'call' another functions by using another Defer
-object as parameter for do() instead of usual anon sub.
+Single Defer object described this way is sort of single I<function>.
+And it's possible to I<call> another functions by using another Defer
+object as parameter for C<do()> instead of usual anon sub.
 
-While you can use both sync and async sub in do(), they all B<MUST> call
-one of done(), throw(), next() or last() when they finish their work,
-and do this B<ONLY ONCE>. This is Defer's way to proceed from one step to
-another, and if not done right Defer object's behaviour is undefined!
+While you can use both sync and async sub in C<do()>, they all B<MUST>
+call one of C<done()>, C<throw()>, C<next()> or C<last()> when they finish
+their work, and do this B<ONLY ONCE>. This is Defer's way to proceed from
+one step to another, and if not done right Defer object's behaviour is
+undefined!
 
 
 =head2 PERSISTENT STATE, LOCAL VARIABLES and SCOPE
 
 There are several ways to implement this, and it's unclear yet which
 way is the best. We can implement full-featured stack with local variables
-similar to perl's 'local' using getter/setter methods; we can fill called
+similar to perl's C<local> using getter/setter methods; we can fill called
 Defer objects with copy of all keys in parent Defer object (so called
 object will have full read-only access to parent's scalar data, and read/write
 access to parent's reference data types); we can do nothing and let user
 manually send all needed data to called Defer object as params and get
-data back using returned values (by done() or throw()).
+data back using returned values (by C<done()> or C<throw()>).
 
 In current implementation we do nothing, so here is some ways to go:
 
@@ -602,8 +606,8 @@ If you want to reuse same Defer object several times, then you should keep
 in mind: keys created inside this object on first run won't be automatically
 removed, so on second and next runs it will see internal data left by
 previous runs. This may or may not be desirable behaviour. In later case
-you should use clone() and run only clones of original object (clones are
-created using C< %$clone=%$orig >, so they share only reference-type keys
+you should use C<clone()> and run only clones of original object (clones are
+created using C<%$clone=%$orig>, so they share only reference-type keys
 which exists in original Defer):
 
     $d->do( $another_defer->clone() );
@@ -612,7 +616,7 @@ which exists in original Defer):
 
 =head1 EXPORTS
 
-Nothing by default, but all documented functions can be explicitly imported.
+Nothing.
 
 
 =head1 INTERFACE 
@@ -627,40 +631,47 @@ Create and return Async::Defer object.
 
 Clone existing Async::Defer object and return clone.
 
-Clone will have same 'program' (STATEMENTS and OPERATORS added to original
-object) and same 'local variables' (non-deep copy of orig object keys
-using C< %$clone = %$orig >). After cloning these two objects can be
-modified (by adding new STATEMENTS, OPERATORS and modifying variables)
+Clone will have same I<program> (I<STATEMENTS> and I<OPERATORS> added to
+original object) and same I<local variables> (non-deep copy of orig object
+keys using C<%$clone=%$orig>). After cloning these two objects can be
+modified (by adding new I<STATEMENTS>, I<OPERATORS> and modifying variables)
 independently.
 
-It's possible to clone() object which is running right now, cloned object
-will not be in running state - this is safe way to run() objects which may
+It's possible to C<clone()> object which is running right now, cloned object
+will not be in running state - this is safe way to C<run()> objects which may
 or may not be already running.
 
 =item run( [ $parent_defer, @params ] )
 
-Start executing object's current 'program', which must be defined first by
-adding at least one STATEMENT (do() or catch(FINALLY=>sub{})) to this object.
+Start executing object's current I<program>, which must be defined first by
+adding at least one I<STATEMENT> (C<do()> or C<<catch(FINALLY=>sub{})>>)
+to this object.
 
-Usually while run() only first STATEMENT will be executed. It will just
-start some async function and returns, and run() will returns immediately
-after this too. Actual execution of this object will continue when started
-async function will finish (usually on Timer or I/O event) and call this
-object's done(), last(), next() or throw() methods.
+Usually while C<run()> only first I<STATEMENT> will be executed (with optional
+C<@params> in parameters). It will just start some async function and
+returns, and C<run()> will returns immediately after this too. Actual
+execution of this object will continue when started async function will
+finish (usually after Timer or I/O event) and call this object's C<done()>,
+C<last()>, C<next()> or C<throw()> methods.
 
-It's possible to make all STATEMENTS sync - in this case full 'program'
-will be executed before returning from run() - but this has no real sense
+It's possible to make all I<STATEMENTS> sync - in this case full I<program>
+will be executed before returning from C<run()> - but this has no real sense
 because you don't need Defer object for sync programs.
 
-There will be no 'return value' at end of 'program', after last STATEMENT
-in this object will call done() nothing else will happens and any parameters
-of that last done() call will be ignored.
+If C<run()> used to start top-level I<program> (i.e. without C<$parent_defer>
+parameter), then there will be no I<return value> at end of I<program> -
+after last I<STATEMENT> in this object will call C<done()> nothing else will
+happens and any parameters of that last C<done()> call will be ignored.
+If this Defer object was started as part of another I<program> (i.e. it was
+added there using C<do()> or just manually executed from some I<STATEMENT> with
+defined C<$parent_defer> parameter), then it I<return value> will be delivered
+to next I<STATEMENT> in C<$parent_defer> object.
 
 =item iter()
 
-This method available only inside while() - both in while()'s \&conditional
-argument and while()'s body STATEMENTS. It return current iteration number
-for nearest while(), counting from 1.
+This method available only inside C<while()> - both in C<while()>'s
+C<\&conditional> argument and C<while()>'s body I<STATEMENTS>. It return
+current iteration number for nearest C<while()>, starting from 1.
 
     # this loop will execute 3 times:
     $d->while(sub{  shift->iter() <= 3  });
@@ -678,61 +689,66 @@ for nearest while(), counting from 1.
 =over
 
 =item do( \&sync_or_async_code )
+
 =item do( $child_defer )
 
-Add STATEMENT to this object's 'program'.
+Add I<STATEMENT> to this object's I<program>.
 
-When this STATEMENT should be executed, \&sync_or_async_code (or
-$child_defer's first STATEMENT) will be called with these params:
+When this I<STATEMENT> should be executed, C<\&sync_or_async_code>
+(or C<$child_defer>'s first I<STATEMENT>) will be called with these params:
 
     ( $defer_object, @optional_results_from_previous_STATEMENT )
 
 =item if( \&conditional )
+
 =item else()
+
 =item end_if()
 
-Add conditional OPERATOR to this object's 'program'.
+Add conditional I<OPERATOR> to this object's I<program>.
 
-When this OPERATOR should be executed, \&conditional will be called with
-single param:
+When this I<OPERATOR> should be executed, C<\&conditional> will be called
+with single param:
 
     ( $defer_object )
 
-The \&conditional B<MUST> be sync, and return true/false.
+The C<\&conditional> B<MUST> be sync, and return true/false.
 
 =item while( \&conditional )
+
 =item end_while()
 
-Add loop OPERATOR to this object's 'program'.
+Add loop I<OPERATOR> to this object's I<program>.
 
-When this OPERATOR should be executed, \&conditional will be called with
+When this I<OPERATOR> should be executed, C<\&conditional> will be called with
 single param:
 
     ( $defer_object )
 
-The \&conditional B<MUST> be sync, and return true/false.
+The C<\&conditional> B<MUST> be sync, and return true/false.
 
 =item try()
+
 =item catch( $regex_or_FINALLY => \&sync_or_async_code, ... )
 
-Add exception handling to this object's 'program'.
+Add exception handling to this object's I<program>.
 
 In general, try/catch/finally behaviour is same as in Java (and probably
 many other languages).
 
-If some STATEMENTS inside try/catch block will throw(), the thrown error
-can be intercepted (using matching regexp in catch()) and handled in any
-way (blocked - if catch() handler call done(), next() or last() or
-replaced by another exception - if catch() handler call throw()).
+If some I<STATEMENTS> inside try/catch block will C<throw()>, the thrown error
+can be intercepted (using matching regexp in C<catch()>) and handled in any
+way (blocked - if C<catch()> handler call C<done()>, C<next()> or C<last()> or
+replaced by another exception - if C<catch()> handler call C<throw()>).
 If exception match more than one regexp, first successfully matched
 regexp's handler will be used. Handler will be executed with params:
 
     ( $defer_object, $error )
 
 In addition to exception handlers you can also define FINALLY handler
-(by using string "FINALLY" instead of regex). FINALLY handler will be
+(by using string C<"FINALLY"> instead of regex). FINALLY handler will be
 called in any case (with/without exception) and may handle this in any way
-just like any other exception handler in catch(). FINALLY handler will
+just like any other exception handler in C<catch()>. FINALLY handler will
 be executed with different params:
 
     # with exception
@@ -742,33 +758,33 @@ be executed with different params:
 
 =back
 
-=head2 FLOW CONTROL for STATEMENTS
+=head2 FLOW CONTROL in STATEMENTS
 
-One, and only one of these methods B<MUST> be called at end of each STATEMENT,
+One, and only one of these methods B<MUST> be called at end of each I<STATEMENT>,
 both sync and async!
 
 =over
 
 =item done( @optional_result )
 
-Go to next STATEMENT/OPERATOR. If next is STATEMENT, it will receive
-@optional_result in it parameters.
+Go to next I<STATEMENT>/I<OPERATOR>. If next is I<STATEMENT>, it will receive
+C<@optional_result> in it parameters.
 
 =item throw( $error )
 
-Throw exception. Nearest matching catch() or FINALLY STATEMENT will be
-executed and receive $error in it parameter.
+Throw exception. Nearest matching C<catch()> or FINALLY I<STATEMENT> will be
+executed and receive C<$error> in it parameter.
 
 =item next()
 
-Move to beginning of nearest while() (or to first STATEMENT if called outside
-while()) and continue with next iteration (if while()'s \&conditional
-still returns true).
+Move to beginning of nearest C<while()> (or to first I<STATEMENT> if
+called outside C<while()>) and continue with next iteration (if C<while()>'s
+C<\&conditional> still returns true).
 
 =item last()
 
-Move to first STATEMENT/OPERATOR after nearest while() (or finish this
-'program' if called outside while() - returning to parent's Defer object
+Move to first I<STATEMENT>/I<OPERATOR> after nearest C<while()> (or finish this
+I<program> if called outside C<while()> - returning to parent's Defer object
 if any).
 
 =back
