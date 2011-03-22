@@ -1,5 +1,10 @@
 Revision history for Async-Defer
 
+0.9.0	Mon Mar 21 20:03:14 EET 2011
+	- last() renamed to break()
+	- next() renamed to continue()
+	- added batch do()
+
 0.0.3	Sun Mar 20 18:23:53 EET 2011
 	- bugfix: keep @result when entering try()
 	- added comments for non-obvious code

@@ -19,12 +19,12 @@ my ($t, $tx);
 # do
 # - accept both CODE and Defer objects
 # - handle correctly both sync and async functions
-# - correctly transfer results from previous to next step, but only if
-#   both previous and next steps was do(), otherwise drop results from
+# - correctly transfer results from previous to continue step, but only if
+#   both previous and continue steps was do(), otherwise drop results from
 #   previous step
 
 $d = Async::Defer->new();
-throws_ok { $d->do() } qr/require CODE or Defer/;
+throws_ok { $d->do() } qr{require CODE/Defer};
 
 $p = Async::Defer->new();
 $d = Async::Defer->new();
@@ -129,5 +129,5 @@ is_deeply \@result, [
     11,     # after try
     20,     # after finally
     (30,31),# after catch (got exception) with finally
-    ], 'transfer results from previous to next step only if both are do()';
+    ], 'transfer results from previous to continue step only if both are do()';
 

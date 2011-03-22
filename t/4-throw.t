@@ -19,7 +19,7 @@ my ($result, @result);
 #   * try+try+throw+catch+catch use second catch if first doesn't match
 #   * if called from deep Defer which doesn't have own try()/catch()
 # - croak if no one catch match
-# - finally can replace current exception with throw/next/last
+# - finally can replace current exception with throw/continue/break
 
 $d = Async::Defer->new();
 $d->try();
@@ -82,12 +82,12 @@ $d->while(sub{ $_[0]->iter() <= 3 });
     $d->try();
         $d->do(sub{ $_[0]->throw('err1') });
     $d->catch(
-        FINALLY=>sub{ push @result, 'f1'; $_[0]->next() },
+        FINALLY=>sub{ push @result, 'f1'; $_[0]->continue() },
     );
     $d->do(sub{ push @result, 'd'; $_[0]->done() });
 $d->end_while();
 @result = (); $d->run();
-is_deeply \@result, [qw(i=1 f1 i=2 f1 i=3 f1)], 'finally can replace current exception with next()';
+is_deeply \@result, [qw(i=1 f1 i=2 f1 i=3 f1)], 'finally can replace current exception with continue()';
 
 $d = Async::Defer->new();
 $d->while(sub{ $_[0]->iter() <= 3 });
@@ -95,11 +95,11 @@ $d->while(sub{ $_[0]->iter() <= 3 });
     $d->try();
         $d->do(sub{ $_[0]->throw('err1') });
     $d->catch(
-        FINALLY=>sub{ push @result, 'f1'; $_[0]->last() },
+        FINALLY=>sub{ push @result, 'f1'; $_[0]->break() },
     );
     $d->do(sub{ push @result, 'd'; $_[0]->done() });
 $d->end_while();
 @result = (); $d->run();
-is_deeply \@result, [qw(i=1 f1)], 'finally can replace current exception with last()';
+is_deeply \@result, [qw(i=1 f1)], 'finally can replace current exception with break()';
 
 

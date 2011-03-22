@@ -14,12 +14,12 @@ my ($result, @result);
 
 
 # done
-# - correctly move to next opcode and transfer result:
+# - correctly move to continue opcode and transfer result:
 #   * CODE to Defer
 #   * Defer to CODE
 #   * catch() to CODE or Defer
-#   * if last operation is CODE or Defer or catch() to parent (if parent
-#     exists and it next operation is CODE or Defer)
+#   * if break operation is CODE or Defer or catch() to parent (if parent
+#     exists and it continue operation is CODE or Defer)
 
 $p = Async::Defer->new();
 $d = Async::Defer->new();
@@ -76,7 +76,7 @@ $p = Async::Defer->new();
 $p->do($d);
 $p->do(sub{ $result = $_[1]; $_[0]->done() });
 $result = undef; $p->run();
-is $result, 10, 'transfer result: last CODE -> parent';
+is $result, 10, 'transfer result: break CODE -> parent';
 $d = Async::Defer->new();
 $d->do(sub{ $_[0]->done(20) });
 $c = Async::Defer->new();
@@ -85,7 +85,7 @@ $p = Async::Defer->new();
 $p->do($c);
 $p->do(sub{ $result = $_[1]; $_[0]->done() });
 $result = undef; $p->run();
-is $result, 20, 'transfer result: last Defer -> parent';
+is $result, 20, 'transfer result: break Defer -> parent';
 $d = Async::Defer->new();
 $d->try();
 $d->do(sub{ $_[0]->throw(30) });
@@ -94,7 +94,7 @@ $p = Async::Defer->new();
 $p->do($d);
 $p->do(sub{ $result = $_[1]; $_[0]->done() });
 $result = undef; $p->run();
-is $result, 30, 'transfer result: last catch -> parent';
+is $result, 30, 'transfer result: break catch -> parent';
 $d = Async::Defer->new();
 $d->try();
 $d->catch(FINALLY=>sub{ $_[0]->done(40) });
@@ -102,6 +102,6 @@ $p = Async::Defer->new();
 $p->do($d);
 $p->do(sub{ $result = $_[1]; $_[0]->done() });
 $result = undef; $p->run();
-is $result, 40, 'transfer result: last finally -> parent';
+is $result, 40, 'transfer result: break finally -> parent';
 
 

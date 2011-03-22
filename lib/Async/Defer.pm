@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use Carp;
 
-use version; our $VERSION = qv('0.0.3');    # REMINDER: update Changes
+use version; our $VERSION = qv('0.9.0');    # REMINDER: update Changes
 
 # REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
@@ -36,7 +36,7 @@ sub new {
         opcode  => [],         # [[OP_CODE,$sub], [OP_TRY], …]
         pc      => NOT_RUNNING,# point to _CURRENT_ opcode, if any
         iter    => [],         # [[1,$outer_while_pc], [8,$inner_while_pc], …]
-        findone => undef,      # undef or ['next'] or ['last'] or ['throw',$err]
+        findone => undef,      # undef or ['continue'] or ['break'] or ['throw',$err]
     };
     return $this;
 }
@@ -83,13 +83,86 @@ sub _add {
 }
 
 sub do {
-    my ($this, $code_or_defer) = @_;
-    my $op
-        = ref $code_or_defer eq 'CODE'      ? OP_CODE
-        : eval{$code_or_defer->can('run')}  ? OP_DEFER
-        : croak 'require CODE or Defer object in first param'
-        ;
-    return $this->_add($op, $code_or_defer);
+    my ($this, $task) = @_;
+    given (ref $task) {
+        when ('CODE') {
+            return $this->_add(OP_CODE, $task);
+        }
+        when (__PACKAGE__) {
+            return $this->_add(OP_DEFER, $task);
+        }
+        when ('ARRAY') {
+            my %task = map { $_ => $task->[$_] } 0 .. $#{ $task };
+            return $this->_add(OP_CODE, _do_batch(1, %task));
+        }
+        when ('HASH') {
+            return $this->_add(OP_CODE, _do_batch(0, %{ $task }));
+        }
+        default {
+            croak 'require CODE/Defer object or ARRAY/HASH in first param'
+        }
+    }
+}
+
+sub _do_batch {
+    my ($is_array, %task) = @_;
+
+    # Isolate each task in own Defer object to guarantee they won't be
+    # surprised by shared state.
+    for my $key (keys %task) {
+        my $task;
+        given (ref $task{$key}) {
+            when ('CODE') {
+                $task = Async::Defer->new();
+                $task->do( $task{$key} );
+            }
+            when (__PACKAGE__) {
+                $task = $task{$key}->clone();
+            }
+            default {
+                my $pos = $is_array ? $key+1 : "{$key}";
+                croak 'require CODE/Defer object in param '.$pos;
+            }
+        }
+        $task{$key} = $task;
+    }
+
+    return sub{
+        my ($d, @taskparams) = @_;
+        my %taskparams
+            = !$is_array ? (@taskparams)
+            :              (map { ($_ => $taskparams[$_]) } 0 .. $#taskparams);
+
+        if (!keys %task) {
+            return $d->done();
+        }
+
+        my %taskresults = map { $_ => undef } keys %task;
+        for my $key (sort keys %task) {     # sort just to simplify testing
+            my $t = Async::Defer->new();
+            $t->try();
+                $t->do( $task{$key} );
+            $t->catch(
+                qr//ms => sub{
+                    my ($t,$err) = @_;      ## no critic (ProhibitReusedNames)
+                    $t->{err} = $err;
+                    $t->done();
+                },
+                FINALLY => sub{
+                    my ($t, @result) = @_;  ## no critic (ProhibitReusedNames)
+                    $taskresults{$key} = $t->{err} // \@result;
+                    if (!grep {!defined} values %taskresults) {
+                        my @taskresults
+                            = !$is_array ? %taskresults
+                            :              map { $taskresults{$_-1} } 1 .. keys %taskresults;
+                        $d->done(@taskresults);
+                    }
+                    return $t->done();
+                },
+            );
+            $t->run( undef, @{ $taskparams{$key} || [] } );
+        }
+    };
 }
 
 sub if {
@@ -230,8 +303,8 @@ sub done {
     my ($this, @result) = @_;
     my $self = $SELF{refaddr $this};
 
-    # If OP_FINALLY was called while processing next(), last() or throw(),
-    # and it was finished with done() - continue with next/last/throw by
+    # If OP_FINALLY was called while processing continue(), break() or throw(),
+    # and it has finished with done() - continue with continue/break/throw by
     # calling them _again_ instead of done().
     if ($self->{findone}) {
         my ($method, @param) = @{ $self->{findone} };
@@ -291,20 +364,20 @@ sub done {
             }
             when (OP_WHILE) {
                 # We can "enter" OP_WHILE in two cases - for the first time,
-                # OR because of next() called inside this OP_WHILE.
+                # OR because of continue() called inside this OP_WHILE.
                 if (!@{$self->{iter}} || $self->{iter}[-1][1] != $self->{pc}) {
                     push @{ $self->{iter} }, [ 1, $self->{pc} ];
                 }
-                # We now already "inside" this OP_WHILE, so we can use last()
+                # We now already "inside" this OP_WHILE, so we can use break()
                 # to exit _this_ OP_WHILE.
                 if (!$param[0]->( $this )) {
-                    return $this->last();
+                    return $this->break();
                 }
             }
             when (OP_ENDWHILE) {
-                # We now still "inside" current OP_WHILE, so we can use next()
+                # We now still "inside" current OP_WHILE, so we can use continue()
                 # to repeat _this_ OP_WHILE.
-                return $this->next();
+                return $this->continue();
             }
         }
     }
@@ -318,15 +391,15 @@ sub done {
     # top-level Defer object, nothing more to do - STOP.
 }
 
-# Before executing next/last logic we have to find and execute all
+# Before executing continue/break logic we have to find and execute all
 # OP_FINALLY for all already open OP_TRY blocks within this OP_WHILE.
 # So, this helper skip opcodes inside this OP_WHILE until it found
 # either OP_FINALLY or OP_ENDWHILE or last opcode.
 sub _skip_while {
     my ($self) = @_;
 
-    # 1. next() can be called exactly on OP_ENDWHILE (by done())
-    # 2. next/last can be called by last opcode
+    # 1. continue() can be called exactly on OP_ENDWHILE (by done())
+    # 2. continue/break can be called by last opcode
     # In both cases we shouldn't do anything (including moving {pc} forward).
     if (_op($self) == OP_ENDWHILE || $self->{pc} == $#{ $self->{opcode} }) {
         return;
@@ -348,18 +421,18 @@ sub _skip_while {
     return;
 }
 
-sub next {
+sub continue {
     my ($this) = @_;
     my $self = $SELF{refaddr $this};
 
-    # Any next call to next/last/throw cancels current next/last/throw (if any).
+    # Any next call to continue/break/throw cancels current continue/break/throw (if any).
     $self->{findone} = undef;
 
     _skip_while($self);
     my ($op, @param) = _op($self);
     if ($op == OP_FINALLY) {
-        # If OP_FINALLY ends with done() - call next() again instead.
-        $self->{findone} = ['next'];
+        # If OP_FINALLY ends with done() - call continue() again instead.
+        $self->{findone} = ['continue'];
         return $param[0]->($this);
     }
 
@@ -373,7 +446,7 @@ sub next {
         :                                 next;
     }
 
-    # If next was called outside OP_WHILE there is no iteration number.
+    # If continue was called outside OP_WHILE there is no iteration number.
     if (@{ $self->{iter} }) {
         $self->{iter}[-1][0]++;
     }
@@ -384,18 +457,18 @@ sub next {
     return $this->done();
 }
 
-sub last { ## no critic (ProhibitAmbiguousNames)
+sub break {
     my ($this) = @_;
     my $self = $SELF{refaddr $this};
 
-    # Any next call to next/last/throw cancels current next/last/throw (if any).
+    # Any next call to continue/break/throw cancels current continue/break/throw (if any).
     $self->{findone} = undef;
 
     _skip_while($self);
     my ($op, @param) = _op($self);
     if ($op == OP_FINALLY) {
-        # If OP_FINALLY ends with done() - call last() again instead.
-        $self->{findone} = ['last'];
+        # If OP_FINALLY ends with done() - call break() again instead.
+        $self->{findone} = ['break'];
         return $param[0]->($this);
     }
 
@@ -409,10 +482,10 @@ sub throw {
     my $self = $SELF{refaddr $this};
     $err //= q{};
 
-    # Any next call to next/last/throw cancels current next/last/throw (if any).
+    # Any next call to continue/break/throw cancels current continue/break/throw (if any).
     $self->{findone} = undef;
 
-    # If throw() was called by last opcode in this OP_TRY (either OP_FINALLY,
+    # If throw() was called by break opcode in this OP_TRY (either OP_FINALLY,
     # or OP_CATCH if there no OP_FINALLY in this OP_TRY), then we should look
     # for handler in outer OP_TRY, not in this one.
     # So we set $stack=1 to skip over current OP_TRY's OP_ENDTRY.
@@ -483,8 +556,8 @@ Async::Defer - VM to write and run async code in usual sync-like way
         # run sync/async code which MUST end with one of:
         # $d->done(@result);
         # $d->throw($error);
-        # $d->next();
-        # $d->last();
+        # $d->continue();
+        # $d->break();
     });
 
     $defer->if(sub{ my $d=shift; return 1 });
@@ -496,15 +569,15 @@ Async::Defer - VM to write and run async code in usual sync-like way
       $defer->catch(
         qr/^io:/    => sub{
             my ($d,$err) = @_;
-            # end with $d->done/throw/next/last
+            # end with $d->done/throw/continue/break
         },
         qr//        => sub{     # WILL CATCH ALL EXCEPTIONS
             my ($d,$err) = @_;
-            # end with $d->done/throw/next/last
+            # end with $d->done/throw/continue/break
         },
         FINALLY     => sub{
             my ($d,$err,@result) = @_;
-            # end with $d->done/throw/next/last
+            # end with $d->done/throw/continue/break
         },
       );
 
@@ -515,7 +588,7 @@ Async::Defer - VM to write and run async code in usual sync-like way
         $defer->do(sub{
             my ($d) = @_;
             # may access $d->iter() here
-            # end with $d->done/throw/next/last
+            # end with $d->done/throw/continue/break
         });
 
       $defer->end_while();
@@ -582,9 +655,9 @@ these parts together:
 These anon subs are similar to I<statements> in perl. Between these
 I<statements> you can use I<flow control> operators like C<if()>,
 C<while()> and C<try()>/C<catch()>. And inside I<statements> you can
-control execution flow using C<done()>, C<throw()>, C<next()>
-and C<last()> operators when current async function will finish and
-will be ready to go to the next step.
+control execution flow using C<done()>, C<throw()>, C<continue()>
+and C<break()> operators when current async function will finish and
+will be ready to go to the continue step.
 Finally, you can use Async::Defer object to keep your I<local variables> -
 this object is empty hash, and you can create any keys in it.
 Single Defer object described this way is sort of single I<function>.
@@ -592,7 +665,7 @@ And it's possible to I<call> another functions by using another Defer
 object as parameter for C<do()> instead of usual anon sub.
 
 While you can use both sync and async sub in C<do()>, they all B<MUST>
-call one of C<done()>, C<throw()>, C<next()> or C<last()> when they finish
+call one of C<done()>, C<throw()>, C<continue()> or C<break()> when they finish
 their work, and do this B<ONLY ONCE>. This is Defer's way to proceed from
 one step to another, and if not done right Defer object's behaviour is
 undefined!
@@ -654,7 +727,7 @@ In current implementation we do nothing, so here is some ways to go:
 
 If you want to reuse same Defer object several times, then you should keep
 in mind: keys created inside this object on first run won't be automatically
-removed, so on second and next runs it will see internal data left by
+removed, so on second and continue runs it will see internal data left by
 previous runs. This may or may not be desirable behaviour. In later case
 you should use C<clone()> and run only clones of original object (clones are
 created using C<%$clone=%$orig>, so they share only reference-type keys
@@ -702,7 +775,7 @@ C<@params> in parameters). It will just start some async function and
 returns, and C<run()> will returns immediately after this too. Actual
 execution of this object will continue when started async function will
 finish (usually after Timer or I/O event) and call this object's C<done()>,
-C<last()>, C<next()> or C<throw()> methods.
+C<break()>, C<continue()> or C<throw()> methods.
 
 It's possible to make all I<STATEMENTS> sync - in this case full I<program>
 will be executed before returning from C<run()> - but this has no real sense
@@ -710,12 +783,12 @@ because you don't need Defer object for sync programs.
 
 If C<run()> used to start top-level I<program> (i.e. without C<$parent_defer>
 parameter), then there will be no I<return value> at end of I<program> -
-after last I<STATEMENT> in this object will call C<done()> nothing else will
-happens and any parameters of that last C<done()> call will be ignored.
+after break I<STATEMENT> in this object will call C<done()> nothing else will
+happens and any parameters of that break C<done()> call will be ignored.
 If this Defer object was started as part of another I<program> (i.e. it was
 added there using C<do()> or just manually executed from some I<STATEMENT> with
 defined C<$parent_defer> parameter), then it I<return value> will be delivered
-to next I<STATEMENT> in C<$parent_defer> object.
+to continue I<STATEMENT> in C<$parent_defer> object.
 
 =item iter()
 
@@ -748,6 +821,67 @@ When this I<STATEMENT> should be executed, C<\&sync_or_async_code>
 (or C<$child_defer>'s first I<STATEMENT>) will be called with these params:
 
     ( $defer_object, @optional_results_from_previous_STATEMENT )
+
+=item do( [\&sync_or_async_code, $child_defer, …] )
+
+=item do( {task1=>\&sync_or_async_code, task2=>$child_defer, …} )
+
+Add one I<STATEMENT> to this object's I<program>.
+
+When this I<STATEMENT> should be executed, all these tasks will be started
+simultaneously (Defer objects using C<clone()> and C<run()>, code by
+transforming into new Defer object and then also C<run()>).
+This I<program> will continue only after all these tasks will be finished
+(either with C<done()> or C<throw()>).
+
+It's possible to provide params individually for each of these tasks and
+receive results/error returned by each of these tasks, but actual syntax
+depends on how these tasks was named - by id (ARRAY) or by name (HASH):
+
+    $d->do(sub{
+        my ($d) = @_;
+        $d->done(
+            ['param1 for task1', 'param2 for task1'],
+            ['param1 for task2'],
+            [undef,              'param2 for task3'],
+            # no params for task4,task5,…
+        );
+    });
+    $d->do([ $d_task1, $d_task2, $d_task3, $d_some, $d_some ]);
+    $d->do(sub{
+        my ($d, @taskresults) = @_;
+        my $id = 1;
+        if (ref $taskresults[$id-1]) {
+            print "task $id results:",  @{ $taskresults[$id-1] };
+        } else {
+            print "task $id throw error:", $taskresults[$id-1];
+        }
+    });
+
+    $d->do(sub{
+        my ($d) = @_;
+        $d->done(
+            task1 => ['param1 for task1', 'param2 for task1'],
+            task2 => ['param1 for task2'],
+            task3 => [undef,              'param2 for task3'],
+            # no params for task4,task5,…
+        );
+    });
+    $d->do({
+        task1 => $d_task1,
+        task2 => $d_task2,
+        task3 => $d_task3,
+        task4 => $d_some,
+        task5 => $d_some,
+    });
+    $d->do(sub{
+        my ($d, %taskresults) = @_;
+        if (ref $taskresults{task1}) {
+            print "task1 results:",  @{ $taskresults{task1} };
+        } else {
+            print "task1 throw error:", $taskresults{task1};
+        }
+    });
 
 =item if( \&conditional )
 
@@ -788,7 +922,7 @@ many other languages).
 
 If some I<STATEMENTS> inside try/catch block will C<throw()>, the thrown error
 can be intercepted (using matching regexp in C<catch()>) and handled in any
-way (blocked - if C<catch()> handler call C<done()>, C<next()> or C<last()> or
+way (blocked - if C<catch()> handler call C<done()>, C<continue()> or C<break()> or
 replaced by another exception - if C<catch()> handler call C<throw()>).
 If exception match more than one regexp, first successfully matched
 regexp's handler will be used. Handler will be executed with params:
@@ -817,7 +951,7 @@ both sync and async!
 
 =item done( @optional_result )
 
-Go to next I<STATEMENT>/I<OPERATOR>. If next is I<STATEMENT>, it will receive
+Go to continue I<STATEMENT>/I<OPERATOR>. If continue is I<STATEMENT>, it will receive
 C<@optional_result> in it parameters.
 
 =item throw( $error )
@@ -825,13 +959,13 @@ C<@optional_result> in it parameters.
 Throw exception. Nearest matching C<catch()> or FINALLY I<STATEMENT> will be
 executed and receive C<$error> in it parameter.
 
-=item next()
+=item continue()
 
 Move to beginning of nearest C<while()> (or to first I<STATEMENT> if
-called outside C<while()>) and continue with next iteration (if C<while()>'s
+called outside C<while()>) and continue with continue iteration (if C<while()>'s
 C<\&conditional> still returns true).
 
-=item last()
+=item break()
 
 Move to first I<STATEMENT>/I<OPERATOR> after nearest C<while()> (or finish this
 I<program> if called outside C<while()> - returning to parent's Defer object

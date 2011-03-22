@@ -15,7 +15,7 @@ my (@result);
 
 # iter
 # - croak outside while
-# - increments both on end_while() and next()
+# - increments both on end_while() and continue()
 # - work correctly for outer and inner while
 # - … even after exception jump from inner to outer while
 
@@ -33,7 +33,7 @@ $d->while(sub{ $_[0]->iter() < 4 });
         my ($d) = @_;
         push @result, $d->iter();
         if ($d->iter() == 2) {
-            $d->next();
+            $d->continue();
         } else {
             $d->done();
         }
@@ -41,7 +41,7 @@ $d->while(sub{ $_[0]->iter() < 4 });
 $d->end_while();
 @result = ();
 $d->run();
-is_deeply \@result, [1,2,3], 'increments both on next() and end_while()';
+is_deeply \@result, [1,2,3], 'increments both on continue() and end_while()';
 
 $d = Async::Defer->new();
 $d->while(sub{ $_[0]->iter() < 4 });
