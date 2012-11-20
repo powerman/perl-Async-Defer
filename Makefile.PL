@@ -9,7 +9,7 @@ requires        'Scalar::Util';
 
 test_requires   'Test::More';
 test_requires   'Test::Exception';
-test_requires   'EV';
+test_requires   'AE';
 
 recommends      'Test::CheckManifest'   => '0.9';
 recommends      'Test::Perl::Critic';

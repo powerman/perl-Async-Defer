@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use Carp;
 
-use version; our $VERSION = qv('0.9.0');    # REMINDER: update Changes
+use version; our $VERSION = qv('0.9.3');    # REMINDER: update Changes
 
 # REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
@@ -79,11 +79,17 @@ sub _add {
     }
 
     push @{ $self->{opcode} }, [ $op, @params ];
-    return;
+    return $this;
 }
 
 sub do {
-    my ($this, $task) = @_;
+    my ($this, $task, @more_tasks) = @_;
+    if(@more_tasks){
+        for ($task, @more_tasks) {
+            $this->do($_);
+        }
+        return $this;
+    }
     given (ref $task) {
         when ('CODE') {
             return $this->_add(OP_CODE, $task);
@@ -113,7 +119,7 @@ sub _do_batch {
         my $task;
         given (ref $task{$key}) {
             when ('CODE') {
-                $task = Async::Defer->new();
+                $task = __PACKAGE__->new();
                 $task->do( $task{$key} );
             }
             when (__PACKAGE__) {
@@ -139,7 +145,7 @@ sub _do_batch {
 
         my %taskresults = map { $_ => undef } keys %task;
         for my $key (sort keys %task) {     # sort just to simplify testing
-            my $t = Async::Defer->new();
+            my $t = __PACKAGE__->new();
             $t->try();
                 $t->do( $task{$key} );
             $t->catch(
@@ -287,6 +293,18 @@ sub run {
         croak 'already running';
     }
     _check_stack($self);
+
+    if(ref($d) eq 'CODE') {
+        my $callback = $d;
+        $d = __PACKAGE__->new();
+        $d->do(
+            sub {
+                my ($defer, @results) = @_;
+                $callback->(@results);
+                $defer->done;
+            }
+        );
+    }
 
     $self->{parent} = $d;
     $this->done(@result);
@@ -736,6 +754,57 @@ which exists in original Defer):
     $d->do( $another_defer->clone() );
     $d->do( $another_defer->clone() );
 
+=head2 NESTED DEFERS
+
+Async::Defer objects can be nested, and there are two ways to do it.
+
+One way is to add a child defer to the parent defer using C<do()> method.
+
+    my $cd = Async::Defer->new();
+    
+    ## setup the child defer.
+    $cd->do( ... );
+
+    ## parent defer
+    my $pd = Async::Defer->new();
+    $pd->do( ... );
+    $pd->do(sub {
+        my $d = shift;
+        ...;
+        $d->done( @arguments_for_child_defer );
+    });
+    ## run the child defer
+    $pd->do($cd);
+    $pd->do(sub {
+        my ($d, @results_from_child_defer) = @_;
+        ...;
+    });
+
+The other way is to call C<run()> on the child defer with its first
+argument being the parent defer. This is very useful when you dynamically
+create the child defer in statements of the parent defer.
+
+    ## parent defer
+    my $pd = Async::Defer->new();
+    $pd->do(sub {
+        my ($d, @args) = @_;
+    
+        ## create the child defer in the statement
+        my $cd = Async::Defer->new();
+        
+        ## setup the child defer
+        $cd->do( ... );
+    
+        ## run() the child.
+        ## You do not have to call $d->done explicitly,
+        ## because the flow continues from the child to the parent.
+        $cd->run($d, @argments_for_child_defer);
+    });
+    $pd->do(sub {
+        my ($d, @results_from_child_defer) = @_;
+        ...;
+    });
+
 
 =head1 EXPORTS
 
@@ -766,6 +835,8 @@ or may not be already running.
 
 =item run( [ $parent_defer, @params ] )
 
+=item run( [ \&callback, @params ] )
+
 Start executing object's current I<program>, which must be defined first by
 adding at least one I<STATEMENT> (C<do()> or C<<catch(FINALLY=>sub{})>>)
 to this object.
@@ -788,7 +859,12 @@ happens and any parameters of that break C<done()> call will be ignored.
 If this Defer object was started as part of another I<program> (i.e. it was
 added there using C<do()> or just manually executed from some I<STATEMENT> with
 defined C<$parent_defer> parameter), then it I<return value> will be delivered
-to continue I<STATEMENT> in C<$parent_defer> object.
+to continue I<STATEMENT> in C<$parent_defer> object (See L</"NESTED DEFERS">).
+
+The first argument for C<run()> may also be a subroutine reference (C<\&callback>).
+In this case, the callback is called after break I<STATEMENT> in this object.
+The arguments for the callback are the results of the break I<STATEMENT>.
+Any value returned from C<\&callback> will be ignored.
 
 =item iter()
 
@@ -809,11 +885,14 @@ current iteration number for nearest C<while()>, starting from 1.
 
 =head2 STATEMENTS and OPERATORS
 
+All I<STATEMENTS> methods return the Async::Defer object,
+so that you can chain method calls.
+
 =over
 
-=item do( \&sync_or_async_code )
+=item do( \&sync_or_async_code, … )
 
-=item do( $child_defer )
+=item do( $child_defer, … )
 
 Add I<STATEMENT> to this object's I<program>.
 
@@ -822,9 +901,25 @@ When this I<STATEMENT> should be executed, C<\&sync_or_async_code>
 
     ( $defer_object, @optional_results_from_previous_STATEMENT )
 
-=item do( [\&sync_or_async_code, $child_defer, …] )
+C<do()> accepts multiple arguments. Those I<STATEMENT>s are added to the object
+in that order, and can be mix of any types - i.e. it's same as call C<do()>
+sequentially multiple times providing these arguments one-by-one.
 
-=item do( {task1=>\&sync_or_async_code, task2=>$child_defer, …} )
+    do(
+        \&code,
+        $defer,
+        [$defer1, $defer2, \&code3],
+        {
+            task1 => $defer4,
+            task2 => \&code5,
+        },
+        \&more_code,
+        …
+    );
+
+=item do( [\&sync_or_async_code, $child_defer, …], … )
+
+=item do( {task1=>\&sync_or_async_code, task2=>$child_defer, …}, … )
 
 Add one I<STATEMENT> to this object's I<program>.
 
@@ -944,8 +1039,9 @@ be executed with different params:
 
 =head2 FLOW CONTROL in STATEMENTS
 
-One, and only one of these methods B<MUST> be called at end of each I<STATEMENT>,
-both sync and async!
+Unless you are nesting child defers, one and only one of these methods B<MUST> be
+called at end of each I<STATEMENT>, both sync and async!
+In the case of nested defers, see L</"NESTED DEFERS">.
 
 =over
 
@@ -1014,9 +1110,14 @@ L<http://search.cpan.org/dist/Async-Defer/>
 Alex Efros  C<< <powerman-asdf@ya.ru> >>
 
 
+=head1 CONTRIBUTORS
+
+Toshio Ito C<< toshioito [at] cpan.org >>
+
+
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2011 Alex Efros <powerman-asdf@ya.ru>.
+Copyright 2011,2012 Alex Efros <powerman-asdf@ya.ru>.
 
 This program is distributed under the MIT (X11) License:
 L<http://www.opensource.org/licenses/mit-license.php>
