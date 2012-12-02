@@ -1,5 +1,9 @@
 Revision history for Async-Defer
 
+0.9.4	Sun Dec  2 16:21:42 EET 2012
+	Reported by toshioito [at] cpan.org
+	- catch-all regexp should be /.*/ instead of //
+
 0.9.3	Tue Nov 20 04:25:51 EET 2012
 	Contributed by toshioito [at] cpan.org
 	- do() now accepts multiple arguments. (t/5-interface_modifications.t)

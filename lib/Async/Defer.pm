@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use Carp;
 
-use version; our $VERSION = qv('0.9.3');    # REMINDER: update Changes
+use version; our $VERSION = qv('0.9.4');    # REMINDER: update Changes
 
 # REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
@@ -149,7 +149,7 @@ sub _do_batch {
             $t->try();
                 $t->do( $task{$key} );
             $t->catch(
-                qr//ms => sub{
+                qr/.*/ms => sub{
                     my ($t,$err) = @_;      ## no critic (ProhibitReusedNames)
                     $t->{err} = $err;
                     $t->done();
@@ -533,7 +533,7 @@ sub throw {
     my ($op, @param) = _op($self);
     if ($op == OP_CATCH) {
         while (my ($cond, $code) = splice @param, 0, 2) {
-            if ($err =~ /$cond/xms) {
+            if ($err =~ /$cond/ms) {
                 return $code->($this, $err);
             }
         }
@@ -589,7 +589,7 @@ Async::Defer - VM to write and run async code in usual sync-like way
             my ($d,$err) = @_;
             # end with $d->done/throw/continue/break
         },
-        qr//        => sub{     # WILL CATCH ALL EXCEPTIONS
+        qr/.*/      => sub{     # WILL CATCH ALL EXCEPTIONS
             my ($d,$err) = @_;
             # end with $d->done/throw/continue/break
         },

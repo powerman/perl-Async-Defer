@@ -745,7 +745,7 @@ severity                           = 4
 
 
 # Always use the `/x' modifier with regular expressions.
-[RegularExpressions::RequireExtendedFormatting]
+[-RegularExpressions::RequireExtendedFormatting]
 # set_themes                         = core maintenance pbp
 # add_themes                         =
 # severity                           = 3
