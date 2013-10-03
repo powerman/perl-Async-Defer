@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use Carp;
 
-use version; our $VERSION = qv('0.9.4');    # REMINDER: update Changes
+use version; our $VERSION = qv('0.9.5');    # REMINDER: update Changes
 
 # REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
@@ -33,9 +33,9 @@ sub new {
     my $this = bless {}, $class;
     $SELF{refaddr $this} = {
         parent  => undef,      # parent Defer object, if any
-        opcode  => [],         # [[OP_CODE,$sub], [OP_TRY], …]
+        opcode  => [],         # [[OP_CODE,$sub], [OP_TRY], ...]
         pc      => NOT_RUNNING,# point to _CURRENT_ opcode, if any
-        iter    => [],         # [[1,$outer_while_pc], [8,$inner_while_pc], …]
+        iter    => [],         # [[1,$outer_while_pc], [8,$inner_while_pc], ...]
         findone => undef,      # undef or ['continue'] or ['break'] or ['throw',$err]
     };
     return $this;

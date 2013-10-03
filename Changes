@@ -1,5 +1,8 @@
 Revision history for Async-Defer
 
+0.9.5   Thu Oct  3 16:10:02 EEST 2013
+	- remove MYMETA.*
+
 0.9.4	Sun Dec  2 16:21:42 EET 2012
 	Reported by toshioito [at] cpan.org
 	- catch-all regexp should be /.*/ instead of //
