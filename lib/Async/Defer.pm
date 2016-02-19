@@ -3,7 +3,7 @@ use 5.012;
 use warnings;
 use strict;
 use Carp;
-no warnings 'experimental::smartmatch';     ## no critic (ProhibitNoWarnings)
+no if $] >= 5.017011, warnings => 'experimental::smartmatch';
 
 our $VERSION = 'v0.9.5';
 
