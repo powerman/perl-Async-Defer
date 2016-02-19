@@ -1,14 +1,14 @@
 package Async::Defer;
-
 use 5.012;
 use warnings;
 use strict;
 use Carp;
+no warnings 'experimental::smartmatch';     ## no critic (ProhibitNoWarnings)
 
-use version; our $VERSION = qv('0.9.5');    # REMINDER: update Changes
+our $VERSION = 'v0.9.5';
 
-# REMINDER: update dependencies in Makefile.PL
 use Scalar::Util qw( refaddr );
+use List::Util qw( any );
 
 ## no critic (ProhibitBuiltinHomonyms)
 
@@ -157,7 +157,7 @@ sub _do_batch {
                 FINALLY => sub{
                     my ($t, @result) = @_;  ## no critic (ProhibitReusedNames)
                     $taskresults{$key} = $t->{err} // \@result;
-                    if (!grep {!defined} values %taskresults) {
+                    if (!any {!defined} values %taskresults) {
                         my @taskresults
                             = !$is_array ? %taskresults
                             :              map { $taskresults{$_-1} } 1 .. keys %taskresults;
@@ -286,7 +286,7 @@ sub run {
     my $self = $SELF{refaddr $this};
 
     my %op_stmt = map {$_=>1} OP_CODE, OP_DEFER, OP_FINALLY;
-    if (!grep {$op_stmt{ $_->[0] }} @{ $self->{opcode} }) {
+    if (!any {$op_stmt{ $_->[0] }} @{ $self->{opcode} }) {
         croak 'no operations to run, use do() first';
     }
     if ($self->{pc} != NOT_RUNNING) {
@@ -556,6 +556,11 @@ __END__
 =head1 NAME
 
 Async::Defer - VM to write and run async code in usual sync-like way
+
+
+=head1 VERSION
+
+This document describes Async::Defer version v0.9.5
 
 
 =head1 SYNOPSIS
@@ -901,7 +906,7 @@ When this I<STATEMENT> should be executed, C<\&sync_or_async_code>
 
     ( $defer_object, @optional_results_from_previous_STATEMENT )
 
-C<do()> accepts multiple arguments. Those I<STATEMENT>s are added to the object
+C<do()> accepts multiple arguments. Those I<STATEMENTS> are added to the object
 in that order, and can be mix of any types - i.e. it's same as call C<do()>
 sequentially multiple times providing these arguments one-by-one.
 
@@ -1070,44 +1075,54 @@ if any).
 =back
 
 
-=head1 BUGS AND LIMITATIONS
-
-No bugs have been reported.
-
-
 =head1 SUPPORT
 
-Please report any bugs or feature requests through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Async-Defer>.
-I will be notified, and then you'll automatically be notified of progress
-on your bug as I make changes.
+=head2 Bugs / Feature Requests
 
-You can also look for information at:
+Please report any bugs or feature requests through the issue tracker
+at L<https://github.com/powerman/perl-Async-Defer/issues>.
+You will be notified automatically of any progress on your issue.
+
+=head2 Source Code
+
+This is open source software. The code repository is available for
+public review and contribution under the terms of the license.
+Feel free to fork the repository and submit pull requests.
+
+L<https://github.com/powerman/perl-Async-Defer>
+
+    git clone https://github.com/powerman/perl-Async-Defer.git
+
+=head2 Resources
 
 =over
 
-=item * RT: CPAN's request tracker
+=item * MetaCPAN Search
 
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Async-Defer>
+L<https://metacpan.org/search?q=Async-Defer>
+
+=item * CPAN Ratings
+
+L<http://cpanratings.perl.org/dist/Async-Defer>
 
 =item * AnnoCPAN: Annotated CPAN documentation
 
 L<http://annocpan.org/dist/Async-Defer>
 
-=item * CPAN Ratings
+=item * CPAN Testers Matrix
 
-L<http://cpanratings.perl.org/d/Async-Defer>
+L<http://matrix.cpantesters.org/?dist=Async-Defer>
 
-=item * Search CPAN
+=item * CPANTS: A CPAN Testing Service (Kwalitee)
 
-L<http://search.cpan.org/dist/Async-Defer/>
+L<http://cpants.cpanauthors.org/dist/Async-Defer>
 
 =back
 
 
 =head1 AUTHOR
 
-Alex Efros  C<< <powerman-asdf@ya.ru> >>
+Alex Efros E<lt>powerman@cpan.orgE<gt>
 
 
 =head1 CONTRIBUTORS
@@ -1115,31 +1130,13 @@ Alex Efros  C<< <powerman-asdf@ya.ru> >>
 Toshio Ito C<< toshioito [at] cpan.org >>
 
 
-=head1 LICENSE AND COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
 
-Copyright 2011,2012 Alex Efros <powerman-asdf@ya.ru>.
+This software is Copyright (c) 2011-2012 by Alex Efros E<lt>powerman@cpan.orgE<gt>.
 
-This program is distributed under the MIT (X11) License:
-L<http://www.opensource.org/licenses/mit-license.php>
+This is free software, licensed under:
 
-Permission is hereby granted, free of charge, to any person
-obtaining a copy of this software and associated documentation
-files (the "Software"), to deal in the Software without
-restriction, including without limitation the rights to use,
-copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the
-Software is furnished to do so, subject to the following
-conditions:
+  The MIT (X11) License
 
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-OTHER DEALINGS IN THE SOFTWARE.
-
+=cut
