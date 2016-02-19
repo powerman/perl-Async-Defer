@@ -7,7 +7,7 @@ Async::Defer - VM to write and run async code in usual sync-like way
 
 # VERSION
 
-This document describes Async::Defer version v0.9.5
+This document describes Async::Defer version v1.0.0
 
 # SYNOPSIS
 
