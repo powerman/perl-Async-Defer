@@ -1,6 +1,7 @@
 Revision history for Async-Defer
 
 {{$NEXT}}
+	- Reformat doc.
 
 v1.0.0  2016-02-19 11:49:06 EET
 	- Switch to Dist::Milla.

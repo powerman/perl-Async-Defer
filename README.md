@@ -260,214 +260,252 @@ Nothing.
 
 # INTERFACE 
 
-- new()
+## GENERAL METHODS
 
-    Create and return Async::Defer object.
+### new
 
-- clone()
+    $defer = Async::Defer->new();
 
-    Clone existing Async::Defer object and return clone.
+Create and return Async::Defer object.
 
-    Clone will have same _program_ (_STATEMENTS_ and _OPERATORS_ added to
-    original object) and same _local variables_ (non-deep copy of orig object
-    keys using `%$clone=%$orig`). After cloning these two objects can be
-    modified (by adding new _STATEMENTS_, _OPERATORS_ and modifying variables)
-    independently.
+### clone
 
-    It's possible to `clone()` object which is running right now, cloned object
-    will not be in running state - this is safe way to `run()` objects which may
-    or may not be already running.
+    $defer2 = $defer->clone();
 
-- run( \[ $parent\_defer, @params \] )
-- run( \[ \\&callback, @params \] )
+Clone existing Async::Defer object and return clone.
 
-    Start executing object's current _program_, which must be defined first by
-    adding at least one _STATEMENT_ (`do()` or `<catch(FINALLY=`sub{})>>)
-    to this object.
+Clone will have same _program_ (_STATEMENTS_ and _OPERATORS_ added to
+original object) and same _local variables_ (non-deep copy of orig object
+keys using `%$clone=%$orig`). After cloning these two objects can be
+modified (by adding new _STATEMENTS_, _OPERATORS_ and modifying variables)
+independently.
 
-    Usually while `run()` only first _STATEMENT_ will be executed (with optional
-    `@params` in parameters). It will just start some async function and
-    returns, and `run()` will returns immediately after this too. Actual
-    execution of this object will continue when started async function will
-    finish (usually after Timer or I/O event) and call this object's `done()`,
-    `break()`, `continue()` or `throw()` methods.
+It's possible to `clone()` object which is running right now, cloned object
+will not be in running state - this is safe way to `run()` objects which may
+or may not be already running.
 
-    It's possible to make all _STATEMENTS_ sync - in this case full _program_
-    will be executed before returning from `run()` - but this has no real sense
-    because you don't need Defer object for sync programs.
+### run
 
-    If `run()` used to start top-level _program_ (i.e. without `$parent_defer`
-    parameter), then there will be no _return value_ at end of _program_ -
-    after break _STATEMENT_ in this object will call `done()` nothing else will
-    happens and any parameters of that break `done()` call will be ignored.
-    If this Defer object was started as part of another _program_ (i.e. it was
-    added there using `do()` or just manually executed from some _STATEMENT_ with
-    defined `$parent_defer` parameter), then it _return value_ will be delivered
-    to continue _STATEMENT_ in `$parent_defer` object (See ["NESTED DEFERS"](#nested-defers)).
+    $defer->run( $parent_defer, @params );
+    $defer->run( \&callback, @params );
 
-    The first argument for `run()` may also be a subroutine reference (`\&callback`).
-    In this case, the callback is called after break _STATEMENT_ in this object.
-    The arguments for the callback are the results of the break _STATEMENT_.
-    Any value returned from `\&callback` will be ignored.
+Start executing object's current _program_, which must be defined first by
+adding at least one _STATEMENT_ (`do()` or `<catch(FINALLY=`sub{})>>)
+to this object.
 
-- iter()
+Usually while `run()` only first _STATEMENT_ will be executed (with optional
+`@params` in parameters). It will just start some async function and
+returns, and `run()` will returns immediately after this too. Actual
+execution of this object will continue when started async function will
+finish (usually after Timer or I/O event) and call this object's `done()`,
+`break()`, `continue()` or `throw()` methods.
 
-    This method available only inside `while()` - both in `while()`'s
-    `\&conditional` argument and `while()`'s body _STATEMENTS_. It return
-    current iteration number for nearest `while()`, starting from 1.
+It's possible to make all _STATEMENTS_ sync - in this case full _program_
+will be executed before returning from `run()` - but this has no real sense
+because you don't need Defer object for sync programs.
 
-        # this loop will execute 3 times:
-        $d->while(sub{  shift->iter() <= 3  });
-            $d->do(sub{
-                my ($d) = @_;
-                printf "Iteration %d\n", $d->iter();
-                $d->done();
-            });
-        $d->end_while();
+If `run()` used to start top-level _program_ (i.e. without `$parent_defer`
+parameter), then there will be no _return value_ at end of _program_ -
+after break _STATEMENT_ in this object will call `done()` nothing else will
+happens and any parameters of that break `done()` call will be ignored.
+If this Defer object was started as part of another _program_ (i.e. it was
+added there using `do()` or just manually executed from some _STATEMENT_ with
+defined `$parent_defer` parameter), then it _return value_ will be delivered
+to continue _STATEMENT_ in `$parent_defer` object (See ["NESTED DEFERS"](#nested-defers)).
+
+The first argument for `run()` may also be a subroutine reference (`\&callback`).
+In this case, the callback is called after break _STATEMENT_ in this object.
+The arguments for the callback are the results of the break _STATEMENT_.
+Any value returned from `\&callback` will be ignored.
+
+### iter
+
+This method available only inside `while()` - both in `while()`'s
+`\&conditional` argument and `while()`'s body _STATEMENTS_. It return
+current iteration number for nearest `while()`, starting from 1.
+
+    # this loop will execute 3 times:
+    $d->while(sub{  shift->iter() <= 3  });
+        $d->do(sub{
+            my ($d) = @_;
+            printf "Iteration %d\n", $d->iter();
+            $d->done();
+        });
+    $d->end_while();
 
 ## STATEMENTS and OPERATORS
 
 All _STATEMENTS_ methods return the Async::Defer object,
 so that you can chain method calls.
 
-- do( \\&sync\_or\_async\_code, … )
-- do( $child\_defer, … )
+### do
 
-    Add _STATEMENT_ to this object's _program_.
+    $defer = $defer->do( \&sync_or_async_code, … );
 
-    When this _STATEMENT_ should be executed, `\&sync_or_async_code`
-    (or `$child_defer`'s first _STATEMENT_) will be called with these params:
+    $defer = $defer->do( $child_defer, … );
 
-        ( $defer_object, @optional_results_from_previous_STATEMENT )
+Add _STATEMENT_ to this object's _program_.
 
-    `do()` accepts multiple arguments. Those _STATEMENTS_ are added to the object
-    in that order, and can be mix of any types - i.e. it's same as call `do()`
-    sequentially multiple times providing these arguments one-by-one.
+When this _STATEMENT_ should be executed, `\&sync_or_async_code`
+(or `$child_defer`'s first _STATEMENT_) will be called with these params:
 
-        do(
-            \&code,
-            $defer,
-            [$defer1, $defer2, \&code3],
-            {
-                task1 => $defer4,
-                task2 => \&code5,
-            },
-            \&more_code,
-            …
+    ( $defer_object, @optional_results_from_previous_STATEMENT )
+
+`do()` accepts multiple arguments. Those _STATEMENTS_ are added to the object
+in that order, and can be mix of any types - i.e. it's same as call `do()`
+sequentially multiple times providing these arguments one-by-one.
+
+    $defer->do(
+        \&code1,
+        $defer2,
+        [$defer3, $defer4, \&code5],
+        {
+            task1 => $defer6,
+            task2 => \&code7,
+        },
+        \&more_code,
+        ...
+    );
+
+    $defer = $defer->do(
+        [\&sync_or_async_code, $child_defer, ...],
+        ...
+    );
+    $defer = $defer->do(
+        {
+            task1 => \&sync_or_async_code,
+            task2 => $child_defer,
+            ...
+        },
+        ...
+    )
+
+Add one _STATEMENT_ to this object's _program_.
+
+When this _STATEMENT_ should be executed, all these tasks will be started
+simultaneously (Defer objects using `clone()` and `run()`, code by
+transforming into new Defer object and then also `run()`).
+This _program_ will continue only after all these tasks will be finished
+(either with `done()` or `throw()`).
+
+It's possible to provide params individually for each of these tasks and
+receive results/error returned by each of these tasks, but actual syntax
+depends on how these tasks was named - by id (ARRAY) or by name (HASH):
+
+    $d->do(sub{
+        my ($d) = @_;
+        $d->done(
+            ['param1 for task1', 'param2 for task1'],
+            ['param1 for task2'],
+            [undef,              'param2 for task3'],
+            # no params for task4,task5,…
         );
+    });
+    $d->do([ $d_task1, $d_task2, $d_task3, $d_some, $d_some ]);
+    $d->do(sub{
+        my ($d, @taskresults) = @_;
+        my $id = 1;
+        if (ref $taskresults[$id-1]) {
+            print "task $id results:",  @{ $taskresults[$id-1] };
+        } else {
+            print "task $id throw error:", $taskresults[$id-1];
+        }
+    });
 
-- do( \[\\&sync\_or\_async\_code, $child\_defer, …\], … )
-- do( {task1=>\\&sync\_or\_async\_code, task2=>$child\_defer, …}, … )
+    $d->do(sub{
+        my ($d) = @_;
+        $d->done(
+            task1 => ['param1 for task1', 'param2 for task1'],
+            task2 => ['param1 for task2'],
+            task3 => [undef,              'param2 for task3'],
+            # no params for task4,task5,…
+        );
+    });
+    $d->do({
+        task1 => $d_task1,
+        task2 => $d_task2,
+        task3 => $d_task3,
+        task4 => $d_some,
+        task5 => $d_some,
+    });
+    $d->do(sub{
+        my ($d, %taskresults) = @_;
+        if (ref $taskresults{task1}) {
+            print "task1 results:",  @{ $taskresults{task1} };
+        } else {
+            print "task1 throw error:", $taskresults{task1};
+        }
+    });
 
-    Add one _STATEMENT_ to this object's _program_.
+### if
 
-    When this _STATEMENT_ should be executed, all these tasks will be started
-    simultaneously (Defer objects using `clone()` and `run()`, code by
-    transforming into new Defer object and then also `run()`).
-    This _program_ will continue only after all these tasks will be finished
-    (either with `done()` or `throw()`).
+### else
 
-    It's possible to provide params individually for each of these tasks and
-    receive results/error returned by each of these tasks, but actual syntax
-    depends on how these tasks was named - by id (ARRAY) or by name (HASH):
+### end\_if
 
-        $d->do(sub{
-            my ($d) = @_;
-            $d->done(
-                ['param1 for task1', 'param2 for task1'],
-                ['param1 for task2'],
-                [undef,              'param2 for task3'],
-                # no params for task4,task5,…
-            );
-        });
-        $d->do([ $d_task1, $d_task2, $d_task3, $d_some, $d_some ]);
-        $d->do(sub{
-            my ($d, @taskresults) = @_;
-            my $id = 1;
-            if (ref $taskresults[$id-1]) {
-                print "task $id results:",  @{ $taskresults[$id-1] };
-            } else {
-                print "task $id throw error:", $taskresults[$id-1];
-            }
-        });
+    $defer = $defer->if( \&conditional );
+    $defer = $defer->else();
+    $defer = $defer->end_if();
 
-        $d->do(sub{
-            my ($d) = @_;
-            $d->done(
-                task1 => ['param1 for task1', 'param2 for task1'],
-                task2 => ['param1 for task2'],
-                task3 => [undef,              'param2 for task3'],
-                # no params for task4,task5,…
-            );
-        });
-        $d->do({
-            task1 => $d_task1,
-            task2 => $d_task2,
-            task3 => $d_task3,
-            task4 => $d_some,
-            task5 => $d_some,
-        });
-        $d->do(sub{
-            my ($d, %taskresults) = @_;
-            if (ref $taskresults{task1}) {
-                print "task1 results:",  @{ $taskresults{task1} };
-            } else {
-                print "task1 throw error:", $taskresults{task1};
-            }
-        });
+Add conditional _OPERATOR_ to this object's _program_.
 
-- if( \\&conditional )
-- else()
-- end\_if()
+When this _OPERATOR_ should be executed, `\&conditional` will be called
+with single param:
 
-    Add conditional _OPERATOR_ to this object's _program_.
+    ( $defer_object )
 
-    When this _OPERATOR_ should be executed, `\&conditional` will be called
-    with single param:
+The `\&conditional` **MUST** be sync, and return true/false.
 
-        ( $defer_object )
+### while
 
-    The `\&conditional` **MUST** be sync, and return true/false.
+### end\_while
 
-- while( \\&conditional )
-- end\_while()
+    $defer = $defer->while( \&conditional );
+    $defer = $defer->end_while();
 
-    Add loop _OPERATOR_ to this object's _program_.
+Add loop _OPERATOR_ to this object's _program_.
 
-    When this _OPERATOR_ should be executed, `\&conditional` will be called with
-    single param:
+When this _OPERATOR_ should be executed, `\&conditional` will be called with
+single param:
 
-        ( $defer_object )
+    ( $defer_object )
 
-    The `\&conditional` **MUST** be sync, and return true/false.
+The `\&conditional` **MUST** be sync, and return true/false.
 
-- try()
-- catch( $regex\_or\_FINALLY => \\&sync\_or\_async\_code, ... )
+### try
 
-    Add exception handling to this object's _program_.
+### catch
 
-    In general, try/catch/finally behaviour is same as in Java (and probably
-    many other languages).
+    $defer = $defer->try();
+    $defer = $defer->catch(
+        $regex_or_FINALLY => \&sync_or_async_code,
+        ...
+    );
 
-    If some _STATEMENTS_ inside try/catch block will `throw()`, the thrown error
-    can be intercepted (using matching regexp in `catch()`) and handled in any
-    way (blocked - if `catch()` handler call `done()`, `continue()` or `break()` or
-    replaced by another exception - if `catch()` handler call `throw()`).
-    If exception match more than one regexp, first successfully matched
-    regexp's handler will be used. Handler will be executed with params:
+Add exception handling to this object's _program_.
 
-        ( $defer_object, $error )
+In general, try/catch/finally behaviour is same as in Java (and probably
+many other languages).
 
-    In addition to exception handlers you can also define FINALLY handler
-    (by using string `"FINALLY"` instead of regex). FINALLY handler will be
-    called in any case (with/without exception) and may handle this in any way
-    just like any other exception handler in `catch()`. FINALLY handler will
-    be executed with different params:
+If some _STATEMENTS_ inside try/catch block will `throw()`, the thrown error
+can be intercepted (using matching regexp in `catch()`) and handled in any
+way (blocked - if `catch()` handler call `done()`, `continue()` or `break()` or
+replaced by another exception - if `catch()` handler call `throw()`).
+If exception match more than one regexp, first successfully matched
+regexp's handler will be used. Handler will be executed with params:
 
-        # with exception
-        ( $defer_object, $error)
-        # without exception
-        ( $defer_object, @optional_results_from_previous_STATEMENT )
+    ( $defer_object, $error )
+
+In addition to exception handlers you can also define FINALLY handler
+(by using string `"FINALLY"` instead of regex). FINALLY handler will be
+called in any case (with/without exception) and may handle this in any way
+just like any other exception handler in `catch()`. FINALLY handler will
+be executed with different params:
+
+    # with exception
+    ( $defer_object, $error)
+    # without exception
+    ( $defer_object, @optional_results_from_previous_STATEMENT )
 
 ## FLOW CONTROL in STATEMENTS
 
@@ -475,27 +513,35 @@ Unless you are nesting child defers, one and only one of these methods **MUST** 
 called at end of each _STATEMENT_, both sync and async!
 In the case of nested defers, see ["NESTED DEFERS"](#nested-defers).
 
-- done( @optional\_result )
+### done
 
-    Go to continue _STATEMENT_/_OPERATOR_. If continue is _STATEMENT_, it will receive
-    `@optional_result` in it parameters.
+    $defer->done( @optional_result );
 
-- throw( $error )
+Go to continue _STATEMENT_/_OPERATOR_. If continue is _STATEMENT_, it will receive
+`@optional_result` in it parameters.
 
-    Throw exception. Nearest matching `catch()` or FINALLY _STATEMENT_ will be
-    executed and receive `$error` in it parameter.
+### throw
 
-- continue()
+    $defer->throw( $error );
 
-    Move to beginning of nearest `while()` (or to first _STATEMENT_ if
-    called outside `while()`) and continue with continue iteration (if `while()`'s
-    `\&conditional` still returns true).
+Throw exception. Nearest matching `catch()` or FINALLY _STATEMENT_ will be
+executed and receive `$error` in it parameter.
 
-- break()
+### continue
 
-    Move to first _STATEMENT_/_OPERATOR_ after nearest `while()` (or finish this
-    _program_ if called outside `while()` - returning to parent's Defer object
-    if any).
+    $defer->continue();
+
+Move to beginning of nearest `while()` (or to first _STATEMENT_ if
+called outside `while()`) and continue with continue iteration (if `while()`'s
+`\&conditional` still returns true).
+
+### break
+
+    $defer->break();
+
+Move to first _STATEMENT_/_OPERATOR_ after nearest `while()` (or finish this
+_program_ if called outside `while()` - returning to parent's Defer object
+if any).
 
 # SUPPORT
 
@@ -547,7 +593,7 @@ Toshio Ito `toshioito [at] cpan.org`
 
 # COPYRIGHT AND LICENSE
 
-This software is Copyright (c) 2011-2012 by Alex Efros &lt;powerman@cpan.org>.
+This software is Copyright (c) 2011- by Alex Efros &lt;powerman@cpan.org>.
 
 This is free software, licensed under:
 
