@@ -5,7 +5,7 @@ use strict;
 use Carp;
 no if $] >= 5.017011, warnings => 'experimental::smartmatch';
 
-our $VERSION = 'v1.0.0';
+our $VERSION = 'v1.0.1';
 
 use Scalar::Util qw( refaddr );
 use List::Util qw( any );
@@ -560,7 +560,7 @@ Async::Defer - VM to write and run async code in usual sync-like way
 
 =head1 VERSION
 
-This document describes Async::Defer version v1.0.0
+This document describes Async::Defer version v1.0.1
 
 
 =head1 SYNOPSIS
